@@ -60,7 +60,7 @@ def init_db() -> None:
                 ticker      TEXT,
                 title       TEXT NOT NULL,
                 summary     TEXT,
-                url         TEXT NOT NULL,
+                url         TEXT,
                 timestamp   TEXT,
                 raw_content TEXT,
                 metadata    TEXT,
@@ -69,16 +69,54 @@ def init_db() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS evaluations (
-                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-                signal_id             INTEGER NOT NULL REFERENCES signals(id),
-                quality_score         INTEGER,
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id              INTEGER NOT NULL REFERENCES signals(id),
+                quality_score          INTEGER,
                 has_falsifiable_thesis INTEGER,
-                cites_evidence        INTEGER,
-                acknowledges_risk     INTEGER,
-                is_business_focused   INTEGER,
-                central_claim         TEXT,
-                one_line_summary      TEXT,
-                verdict               TEXT,
-                evaluated_at          TEXT NOT NULL
+                cites_evidence         INTEGER,
+                acknowledges_risk      INTEGER,
+                is_business_focused    INTEGER,
+                bear_case              TEXT,
+                central_claim          TEXT,
+                one_line_summary       TEXT,
+                verdict                TEXT,
+                evaluated_at           TEXT NOT NULL
             );
         """)
+
+        # Migration: if evaluations table is missing bear_case, it's the old schema.
+        # Drop and recreate signals + evaluations (safe — they contain no real data yet).
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(evaluations)").fetchall()}
+        if "bear_case" not in cols:
+            conn.executescript("""
+                DROP TABLE IF EXISTS evaluations;
+                DROP TABLE IF EXISTS signals;
+                CREATE TABLE signals (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source      TEXT NOT NULL,
+                    raw_id      TEXT NOT NULL,
+                    ticker      TEXT,
+                    title       TEXT NOT NULL,
+                    summary     TEXT,
+                    url         TEXT,
+                    timestamp   TEXT,
+                    raw_content TEXT,
+                    metadata    TEXT,
+                    fetched_at  TEXT NOT NULL,
+                    UNIQUE(source, raw_id)
+                );
+                CREATE TABLE evaluations (
+                    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                    signal_id              INTEGER NOT NULL REFERENCES signals(id),
+                    quality_score          INTEGER,
+                    has_falsifiable_thesis INTEGER,
+                    cites_evidence         INTEGER,
+                    acknowledges_risk      INTEGER,
+                    is_business_focused    INTEGER,
+                    bear_case              TEXT,
+                    central_claim          TEXT,
+                    one_line_summary       TEXT,
+                    verdict                TEXT,
+                    evaluated_at           TEXT NOT NULL
+                );
+            """)

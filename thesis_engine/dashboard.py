@@ -338,8 +338,110 @@ elif page == "Thesis Journal":
 
 # ─── RESEARCH ─────────────────────────────────────────────────────────────────
 elif page == "Research":
+    import hashlib
+    import json as _json
+    from datetime import datetime as _dt2, timezone as _tz2
+    from research.evaluator import get_evaluator
+    from research.adapters.base import Signal as _Signal
+    from thesis_engine.config import USE_MOCK_EVALUATOR
+
     st.title("Research Signals")
-    st.caption("Signals fetched from SEC EDGAR and financial news RSS, evaluated for argument quality.")
+    evaluator_label = "mock evaluator" if USE_MOCK_EVALUATOR else "Claude claude-sonnet-4-6"
+    st.caption(f"SEC EDGAR + financial news RSS, evaluated for argument quality ({evaluator_label}).")
+
+    # ── Manual paste-in ──────────────────────────────────────────────────────
+    with st.expander("Paste & Evaluate — run any text through the evaluator", expanded=False):
+        with st.form("manual_eval_form"):
+            paste_content = st.text_area(
+                "Paste content (Reddit post, Substack, X thread, anything)",
+                height=200,
+                placeholder="Paste the full text you want evaluated...",
+            )
+            col_a, col_b = st.columns(2)
+            paste_ticker = col_a.text_input("Ticker (optional)", placeholder="NVDA").upper().strip()
+            paste_source_note = col_b.text_input("Source note (optional)", placeholder="e.g. Reddit r/investing DD")
+            submitted = st.form_submit_button("Evaluate", type="primary")
+
+        if submitted:
+            if not paste_content.strip():
+                st.error("Paste some content first.")
+            else:
+                raw_id = hashlib.sha256(paste_content.encode()).hexdigest()[:16]
+                with get_conn() as _c:
+                    existing = _c.execute(
+                        "SELECT s.id FROM signals s JOIN evaluations e ON e.signal_id = s.id "
+                        "WHERE s.source = 'manual' AND s.raw_id = ?", (raw_id,)
+                    ).fetchone()
+
+                if existing:
+                    st.info("This content has already been evaluated — see results in the list below.")
+                else:
+                    signal = _Signal(
+                        source="manual",
+                        raw_id=raw_id,
+                        ticker=paste_ticker or None,
+                        title=paste_source_note or "Manual paste",
+                        summary=None,
+                        url=None,
+                        timestamp=_dt2.now(_tz2.utc).isoformat(),
+                        raw_content=paste_content.strip(),
+                        metadata={"source_note": paste_source_note},
+                        fetched_at=_dt2.now(_tz2.utc).isoformat(),
+                    )
+                    with st.spinner("Evaluating..."):
+                        result = get_evaluator().evaluate(signal)
+
+                    if result is None:
+                        st.error("Evaluation failed — check logs.")
+                    else:
+                        with get_conn() as _c:
+                            cur = _c.execute(
+                                """INSERT OR IGNORE INTO signals
+                                   (source, raw_id, ticker, title, summary, url,
+                                    timestamp, raw_content, metadata, fetched_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (signal.source, signal.raw_id, signal.ticker, signal.title,
+                                 signal.summary, signal.url, signal.timestamp,
+                                 (paste_content.strip())[:300],
+                                 _json.dumps(signal.metadata), signal.fetched_at),
+                            )
+                            sig_id = cur.lastrowid or _c.execute(
+                                "SELECT id FROM signals WHERE source='manual' AND raw_id=?", (raw_id,)
+                            ).fetchone()["id"]
+                            _c.execute(
+                                """INSERT INTO evaluations
+                                   (signal_id, quality_score, has_falsifiable_thesis, cites_evidence,
+                                    acknowledges_risk, is_business_focused, bear_case, central_claim,
+                                    one_line_summary, verdict, evaluated_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (sig_id,
+                                 result.get("quality_score"),
+                                 int(bool(result.get("has_falsifiable_thesis"))),
+                                 int(bool(result.get("cites_evidence"))),
+                                 int(bool(result.get("acknowledges_risk"))),
+                                 int(bool(result.get("is_business_focused"))),
+                                 result.get("bear_case"),
+                                 result.get("central_claim"),
+                                 result.get("one_line_summary"),
+                                 result.get("verdict"),
+                                 result["evaluated_at"]),
+                            )
+
+                        score = result.get("quality_score", 0)
+                        verdict = result.get("verdict", "skip")
+                        if verdict == "worth_reading":
+                            st.success(f"Worth reading — score {score}/100")
+                        else:
+                            st.warning(f"Skip — score {score}/100")
+                        if result.get("one_line_summary"):
+                            st.markdown(f"**Summary:** {result['one_line_summary']}")
+                        if result.get("bear_case"):
+                            st.markdown(f"**Bear case:** {result['bear_case']}")
+                        if result.get("central_claim"):
+                            st.markdown(f"**Central claim:** {result['central_claim']}")
+                        st.rerun()
+
+    st.divider()
 
     col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
     ticker_filter = col_f1.text_input("Filter by ticker", placeholder="NVDA").upper().strip()
@@ -350,7 +452,7 @@ elif page == "Research":
         SELECT s.id, s.source, s.ticker, s.title, s.url, s.timestamp, s.raw_content,
                e.quality_score, e.has_falsifiable_thesis, e.cites_evidence,
                e.acknowledges_risk, e.is_business_focused,
-               e.central_claim, e.one_line_summary, e.verdict, e.evaluated_at
+               e.bear_case, e.central_claim, e.one_line_summary, e.verdict, e.evaluated_at
         FROM signals s
         LEFT JOIN evaluations e ON e.signal_id = s.id
         WHERE 1=1
@@ -396,6 +498,8 @@ elif page == "Research":
                 c4.metric("Risk noted", "✓" if r.get("acknowledges_risk") else "✗")
                 c5.metric("Business", "✓" if r.get("is_business_focused") else "✗")
 
+                if r.get("bear_case"):
+                    st.markdown(f"**Bear case:** {r['bear_case']}")
                 if r.get("central_claim"):
                     st.markdown(f"**Central claim:** {r['central_claim']}")
 

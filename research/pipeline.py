@@ -74,8 +74,9 @@ def run_pipeline() -> dict:
                 stats["new"] += 1
 
     # 3. Evaluate unevaluated signals
-    # Import here to avoid loading anthropic if API key not set
-    from research.evaluator import evaluate
+    from research.evaluator import get_evaluator
+    evaluator = get_evaluator()
+    logger.info(f"Using {type(evaluator).__name__}")
 
     with get_conn() as conn:
         unevaluated = _get_unevaluated(conn)
@@ -96,7 +97,7 @@ def run_pipeline() -> dict:
             fetched_at=row["fetched_at"],
         )
 
-        result = evaluate(signal)
+        result = evaluator.evaluate(signal)
         if result is None:
             stats["errors"] += 1
             continue
@@ -106,9 +107,9 @@ def run_pipeline() -> dict:
                 """
                 INSERT INTO evaluations
                     (signal_id, quality_score, has_falsifiable_thesis, cites_evidence,
-                     acknowledges_risk, is_business_focused, central_claim,
+                     acknowledges_risk, is_business_focused, bear_case, central_claim,
                      one_line_summary, verdict, evaluated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -117,6 +118,7 @@ def run_pipeline() -> dict:
                     int(bool(result.get("cites_evidence"))),
                     int(bool(result.get("acknowledges_risk"))),
                     int(bool(result.get("is_business_focused"))),
+                    result.get("bear_case"),
                     result.get("central_claim"),
                     result.get("one_line_summary"),
                     result.get("verdict"),

@@ -23,6 +23,7 @@ CONVICTION_LABELS = {
 
 # Research signal engine
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+USE_MOCK_EVALUATOR = os.getenv("USE_MOCK_EVALUATOR", "true").lower() == "true"
 EDGAR_USER_AGENT = os.getenv("EDGAR_USER_AGENT", "thesis-engine research")
 EDGAR_WATCHLIST = [t.strip().upper() for t in os.getenv("EDGAR_WATCHLIST", "").split(",") if t.strip()]
 EDGAR_FILING_TYPES = [t.strip().upper() for t in os.getenv("EDGAR_FILING_TYPES", "10-K,10-Q,8-K").split(",") if t.strip()]
