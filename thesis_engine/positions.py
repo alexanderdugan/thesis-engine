@@ -1,3 +1,4 @@
+from __future__ import annotations
 from datetime import datetime, timezone
 
 from thesis_engine.database import get_conn
@@ -21,28 +22,40 @@ def open_position(
 ) -> dict:
     symbol = symbol.upper().strip()
 
-    # Guard: no concurrent positions in same symbol
+    # Guard: no concurrent positions in same symbol (open or pending)
     with get_conn() as conn:
         existing = conn.execute(
-            "SELECT id FROM positions WHERE symbol = ? AND status = 'open'",
+            "SELECT id FROM positions WHERE symbol = ? AND status IN ('open', 'pending')",
             (symbol,),
         ).fetchone()
     if existing:
-        raise ValueError(f"An open position in {symbol} already exists. Close it before opening a new one.")
+        raise ValueError(f"A position in {symbol} already exists. Close or cancel it first.")
 
-    # 1. Place order with Alpaca (before any DB writes)
-    order = _client.place_market_order(symbol, qty)
-    fill = _client.poll_order_until_filled(order["order_id"])
+    market = _client.get_market_status()
+    is_open = market["is_open"]
 
-    # 2. Write position + thesis atomically
+    order = _client.place_market_order(symbol, qty, opg=not is_open)
+
+    if is_open:
+        fill = _client.poll_order_until_filled(order["order_id"])
+        entry_price = fill["filled_avg_price"]
+        filled_qty = fill["filled_qty"]
+        db_status = "open"
+    else:
+        # OPG order — will fill at next market open
+        fill = None
+        entry_price = 0.0
+        filled_qty = qty
+        db_status = "pending"
+
     with get_conn() as conn:
         cur = conn.execute(
             """
             INSERT INTO positions
                 (alpaca_order_id, symbol, qty, entry_price, status, opened_at)
-            VALUES (?, ?, ?, ?, 'open', ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (fill["order_id"], symbol, fill["filled_qty"], fill["filled_avg_price"], _now()),
+            (order["order_id"], symbol, filled_qty, entry_price, db_status, _now()),
         )
         position_id = cur.lastrowid
         create_thesis(
@@ -55,7 +68,12 @@ def open_position(
             conviction=conviction,
         )
 
-    return {"position_id": position_id, "fill": fill}
+    return {
+        "position_id": position_id,
+        "fill": fill,
+        "market_open": is_open,
+        "next_open": market["next_open"] if not is_open else None,
+    }
 
 
 def close_position(symbol: str, outcome_notes: str) -> dict:
@@ -67,23 +85,17 @@ def close_position(symbol: str, outcome_notes: str) -> dict:
             (symbol,),
         ).fetchone()
     if not pos_row:
-        raise ValueError(f"No open position found for {symbol}")
+        raise ValueError(f"No filled open position found for {symbol}. Pending orders must fill before closing.")
 
     pos = dict(pos_row)
 
-    # 1. Close with Alpaca
     _client.close_position(symbol)
     exit_price = _client.poll_position_closed(symbol)
 
-    # 2. Update DB
     now = _now()
     with get_conn() as conn:
         conn.execute(
-            """
-            UPDATE positions
-            SET status = 'closed', exit_price = ?, closed_at = ?
-            WHERE id = ?
-            """,
+            "UPDATE positions SET status = 'closed', exit_price = ?, closed_at = ? WHERE id = ?",
             (exit_price, now, pos["id"]),
         )
         thesis_row = conn.execute(
@@ -99,7 +111,7 @@ def close_position(symbol: str, outcome_notes: str) -> dict:
 
 
 def sync_positions() -> tuple[list[dict], str]:
-    """Reconcile DB open positions with live Alpaca data. Returns (positions, last_synced_iso)."""
+    """Reconcile DB positions with live Alpaca data. Promotes pending→open on fill."""
     alpaca_positions = {p["symbol"]: p for p in _client.get_open_positions()}
 
     with get_conn() as conn:
@@ -109,7 +121,7 @@ def sync_positions() -> tuple[list[dict], str]:
                    t.conviction, t.id as thesis_id
             FROM positions p
             LEFT JOIN theses t ON t.position_id = p.id
-            WHERE p.status = 'open'
+            WHERE p.status IN ('open', 'pending')
             ORDER BY p.opened_at DESC
             """
         ).fetchall()
@@ -117,6 +129,36 @@ def sync_positions() -> tuple[list[dict], str]:
     results = []
     for row in db_rows:
         pos = dict(row)
+
+        if pos["status"] == "pending":
+            order_info = _client.get_order(pos["alpaca_order_id"])
+            if order_info["filled"]:
+                # Promote to open with real fill data
+                with get_conn() as conn:
+                    conn.execute(
+                        """
+                        UPDATE positions
+                        SET status = 'open', entry_price = ?, opened_at = ?
+                        WHERE id = ?
+                        """,
+                        (order_info["filled_avg_price"], order_info["filled_at"], pos["id"]),
+                    )
+                pos["status"] = "open"
+                pos["entry_price"] = order_info["filled_avg_price"]
+            elif order_info["rejected"]:
+                with get_conn() as conn:
+                    conn.execute(
+                        "UPDATE positions SET status = 'rejected' WHERE id = ?",
+                        (pos["id"],),
+                    )
+                continue  # drop from results
+            else:
+                pos["current_price"] = None
+                pos["unrealized_pl"] = None
+                pos["unrealized_plpc"] = None
+                results.append(pos)
+                continue
+
         live = alpaca_positions.get(pos["symbol"])
         if live:
             pos["current_price"] = live["current_price"]
@@ -140,7 +182,7 @@ def list_open_positions() -> list[dict]:
                    t.conviction, t.id as thesis_id
             FROM positions p
             LEFT JOIN theses t ON t.position_id = p.id
-            WHERE p.status = 'open'
+            WHERE p.status IN ('open', 'pending')
             ORDER BY p.opened_at DESC
             """
         ).fetchall()

@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from thesis_engine.database import init_db
 from thesis_engine.config import CONVICTION_LABELS
 from thesis_engine.positions import open_position, close_position, sync_positions
+from thesis_engine.alpaca_client import AlpacaClient
 from thesis_engine.thesis_journal import list_theses
 from thesis_engine.performance import take_snapshot, get_performance_history, get_summary
 
@@ -27,6 +28,19 @@ page = st.sidebar.radio(
     index=0,
 )
 
+@st.cache_data(ttl=60)
+def _market_status():
+    return AlpacaClient().get_market_status()
+
+_mkt = _market_status()
+if _mkt["is_open"]:
+    st.sidebar.success("Market open")
+else:
+    from datetime import datetime, timezone as _tz
+    next_open_dt = datetime.fromisoformat(_mkt["next_open"])
+    next_open_str = next_open_dt.strftime("%a %b %-d, %-I:%M %p ET")
+    st.sidebar.warning(f"Market closed · opens {next_open_str}")
+
 # ─── POSITIONS ────────────────────────────────────────────────────────────────
 if page == "Positions":
     st.title("Open Positions")
@@ -45,26 +59,34 @@ if page == "Positions":
 
         for pos in positions:
             symbol = pos["symbol"]
+            is_pending = pos["status"] == "pending"
             timeline_date = date.fromisoformat(pos["expected_timeline"]) if pos.get("expected_timeline") else None
             days_left = (timeline_date - today).days if timeline_date else None
-            overdue = days_left is not None and days_left < 0
+            overdue = days_left is not None and days_left < 0 and not is_pending
 
-            with st.expander(
-                f"{'🔴 ' if overdue else ''}{symbol}  —  "
-                f"{'▲' if pos.get('unrealized_pl', 0) >= 0 else '▼'} "
-                f"${pos.get('unrealized_pl', 0):+,.2f}  "
-                f"({pos.get('unrealized_plpc', 0) * 100:+.2f}%)",
-                expanded=True,
-            ):
+            if is_pending:
+                header = f"⏳ {symbol}  —  Pending (fills at market open)"
+            else:
+                pl = pos.get('unrealized_pl') or 0
+                plpc = (pos.get('unrealized_plpc') or 0) * 100
+                header = (
+                    f"{'🔴 ' if overdue else ''}{symbol}  —  "
+                    f"{'▲' if pl >= 0 else '▼'} ${pl:+,.2f}  ({plpc:+.2f}%)"
+                )
+
+            with st.expander(header, expanded=True):
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Shares", pos["qty"])
-                col2.metric("Entry", f"${pos['entry_price']:.2f}")
-                col3.metric("Current", f"${pos.get('current_price', pos['entry_price']):.2f}")
+                col2.metric("Entry", "Pending" if is_pending else f"${pos['entry_price']:.2f}")
+                col3.metric("Current", "—" if is_pending else f"${pos.get('current_price', pos['entry_price']):.2f}")
                 if days_left is not None:
                     label = f"{'OVERDUE ' if overdue else ''}Timeline"
                     col4.metric(label, f"{abs(days_left)}d {'past' if overdue else 'left'}")
                 else:
                     col4.metric("Timeline", "—")
+
+                if is_pending:
+                    st.info("OPG order submitted — this position will fill at the next market open and update automatically on sync.")
 
                 st.markdown(f"**Thesis:** {pos.get('thesis_text', '—')}")
                 st.markdown(f"**Falsification:** {pos.get('falsification_criteria', '—')}")
@@ -72,31 +94,37 @@ if page == "Positions":
                 if conviction:
                     st.markdown(f"**Conviction:** {conviction}/5 — {CONVICTION_LABELS.get(conviction, '')}")
 
-                st.divider()
-                st.markdown("**Close this position**")
-                with st.form(key=f"close_{symbol}"):
-                    outcome = st.text_area(
-                        "Outcome notes (required) — how did the thesis play out?",
-                        key=f"outcome_{symbol}",
-                        height=100,
-                    )
-                    submitted = st.form_submit_button(f"Close {symbol}")
-                    if submitted:
-                        if not outcome.strip():
-                            st.error("Outcome notes are required before closing.")
-                        else:
-                            try:
-                                with st.spinner(f"Closing {symbol}..."):
-                                    result = close_position(symbol, outcome.strip())
-                                st.success(f"Closed {symbol} at ${result['exit_price']:.2f}")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(str(e))
+                if not is_pending:
+                    st.divider()
+                    st.markdown("**Close this position**")
+                    with st.form(key=f"close_{symbol}"):
+                        outcome = st.text_area(
+                            "Outcome notes (required) — how did the thesis play out?",
+                            key=f"outcome_{symbol}",
+                            height=100,
+                        )
+                        submitted = st.form_submit_button(f"Close {symbol}")
+                        if submitted:
+                            if not outcome.strip():
+                                st.error("Outcome notes are required before closing.")
+                            else:
+                                try:
+                                    with st.spinner(f"Closing {symbol}..."):
+                                        result = close_position(symbol, outcome.strip())
+                                    st.success(f"Closed {symbol} at ${result['exit_price']:.2f}")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(str(e))
 
 # ─── NEW TRADE ────────────────────────────────────────────────────────────────
 elif page == "New Trade":
     st.title("New Trade")
-    st.caption("All fields are required. The order and thesis are placed as one atomic action.")
+    if _mkt["is_open"]:
+        st.caption("Market is open — order will fill immediately.")
+    else:
+        from datetime import datetime as _dt2
+        next_open = _dt2.fromisoformat(_mkt["next_open"]).strftime("%a %b %-d, %-I:%M %p ET")
+        st.caption(f"Market is closed — order will be submitted as OPG and fill at next open ({next_open}).")
 
     with st.form("new_trade_form"):
         st.subheader("Order")
@@ -153,12 +181,20 @@ elif page == "New Trade":
                         falsification_criteria=falsification_criteria.strip(),
                         conviction=conviction,
                     )
-                fill = result["fill"]
-                st.success(
-                    f"Order filled: {fill['filled_qty']} share(s) of {symbol} "
-                    f"@ ${fill['filled_avg_price']:.2f}. Thesis recorded."
-                )
-                st.balloons()
+                if result["market_open"]:
+                    fill = result["fill"]
+                    st.success(
+                        f"Order filled: {fill['filled_qty']} share(s) of {symbol} "
+                        f"@ ${fill['filled_avg_price']:.2f}. Thesis recorded."
+                    )
+                    st.balloons()
+                else:
+                    from datetime import datetime as _dt
+                    next_open = _dt.fromisoformat(result["next_open"]).strftime("%a %b %-d, %-I:%M %p ET")
+                    st.warning(
+                        f"Market is closed. OPG order queued for {symbol} ({qty} share(s)) — "
+                        f"will fill at market open ({next_open}). Thesis recorded."
+                    )
             except ValueError as e:
                 st.error(str(e))
             except TimeoutError as e:

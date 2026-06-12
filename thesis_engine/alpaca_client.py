@@ -32,15 +32,37 @@ class AlpacaClient:
             "buying_power": float(acct.buying_power),
         }
 
-    def place_market_order(self, symbol: str, qty: int) -> dict:
+    def get_market_status(self) -> dict:
+        clock = self._trading.get_clock()
+        return {
+            "is_open": bool(clock.is_open),
+            "next_open": clock.next_open.isoformat(),
+            "next_close": clock.next_close.isoformat(),
+        }
+
+    def place_market_order(self, symbol: str, qty: int, opg: bool = False) -> dict:
+        tif = TimeInForce.OPG if opg else TimeInForce.DAY
         req = MarketOrderRequest(
             symbol=symbol,
             qty=qty,
             side=OrderSide.BUY,
-            time_in_force=TimeInForce.DAY,
+            time_in_force=tif,
         )
         order = self._trading.submit_order(req)
         return {"order_id": str(order.id), "status": str(order.status)}
+
+    def get_order(self, order_id: str) -> dict:
+        order = self._trading.get_order_by_id(order_id)
+        filled = order.status == OrderStatus.FILLED
+        return {
+            "order_id": str(order.id),
+            "status": str(order.status),
+            "filled": filled,
+            "filled_avg_price": float(order.filled_avg_price) if filled and order.filled_avg_price else None,
+            "filled_qty": int(float(order.filled_qty)) if filled and order.filled_qty else None,
+            "filled_at": str(order.filled_at) if filled else None,
+            "rejected": order.status in (OrderStatus.REJECTED, OrderStatus.CANCELED),
+        }
 
     def poll_order_until_filled(self, order_id: str, timeout: float = 10.0, interval: float = 0.5) -> dict:
         deadline = time.time() + timeout
