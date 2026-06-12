@@ -52,4 +52,33 @@ def init_db() -> None:
                 qqq_return_cumulative       REAL,
                 created_at                  TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS signals (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                source      TEXT NOT NULL,
+                raw_id      TEXT NOT NULL,
+                ticker      TEXT,
+                title       TEXT NOT NULL,
+                summary     TEXT,
+                url         TEXT NOT NULL,
+                timestamp   TEXT,
+                raw_content TEXT,
+                metadata    TEXT,
+                fetched_at  TEXT NOT NULL,
+                UNIQUE(source, raw_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS evaluations (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id             INTEGER NOT NULL REFERENCES signals(id),
+                quality_score         INTEGER,
+                has_falsifiable_thesis INTEGER,
+                cites_evidence        INTEGER,
+                acknowledges_risk     INTEGER,
+                is_business_focused   INTEGER,
+                central_claim         TEXT,
+                one_line_summary      TEXT,
+                verdict               TEXT,
+                evaluated_at          TEXT NOT NULL
+            );
         """)

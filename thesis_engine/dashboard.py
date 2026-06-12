@@ -9,6 +9,7 @@ from thesis_engine.positions import open_position, close_position, sync_position
 from thesis_engine.alpaca_client import AlpacaClient
 from thesis_engine.thesis_journal import list_theses
 from thesis_engine.performance import take_snapshot, get_performance_history, get_summary
+from thesis_engine.database import get_conn
 
 init_db()
 
@@ -24,7 +25,7 @@ st.markdown("""
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Positions", "New Trade", "Performance", "Thesis Journal"],
+    ["Positions", "New Trade", "Performance", "Thesis Journal", "Research"],
     index=0,
 )
 
@@ -334,3 +335,70 @@ elif page == "Thesis Journal":
                 closed = t.get("closed_at", "")
                 closed_str = f"  →  Closed {closed[:10]}" if closed else ""
                 st.caption(f"Opened {opened}{closed_str}")
+
+# ─── RESEARCH ─────────────────────────────────────────────────────────────────
+elif page == "Research":
+    st.title("Research Signals")
+    st.caption("Signals fetched from SEC EDGAR and financial news RSS, evaluated for argument quality.")
+
+    col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
+    ticker_filter = col_f1.text_input("Filter by ticker", placeholder="NVDA").upper().strip()
+    source_filter = col_f2.selectbox("Source", ["All", "edgar", "rss"], index=0)
+    worth_only = col_f3.checkbox("Worth reading only", value=True)
+
+    query = """
+        SELECT s.id, s.source, s.ticker, s.title, s.url, s.timestamp, s.raw_content,
+               e.quality_score, e.has_falsifiable_thesis, e.cites_evidence,
+               e.acknowledges_risk, e.is_business_focused,
+               e.central_claim, e.one_line_summary, e.verdict, e.evaluated_at
+        FROM signals s
+        LEFT JOIN evaluations e ON e.signal_id = s.id
+        WHERE 1=1
+    """
+    params = []
+    if worth_only:
+        query += " AND e.verdict = 'worth_reading'"
+    if ticker_filter:
+        query += " AND s.ticker = ?"
+        params.append(ticker_filter)
+    if source_filter != "All":
+        query += " AND s.source = ?"
+        params.append(source_filter)
+    query += " ORDER BY e.quality_score DESC, s.timestamp DESC LIMIT 100"
+
+    with get_conn() as conn:
+        rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    if not rows:
+        if worth_only:
+            st.info("No worth-reading signals yet. Run `python scripts/run_pipeline.py` to fetch and evaluate content.")
+        else:
+            st.info("No signals found. Run `python scripts/run_pipeline.py` to populate.")
+    else:
+        st.caption(f"{len(rows)} signal(s)")
+        for r in rows:
+            score = r.get("quality_score")
+            verdict = r.get("verdict") or "unevaluated"
+            ticker_badge = f"**{r['ticker']}** · " if r.get("ticker") else ""
+            source_label = r["source"].upper()
+            summary = r.get("one_line_summary") or r.get("title", "")[:80]
+
+            score_color = "🟢" if (score or 0) >= 75 else "🟡" if (score or 0) >= 50 else "🔴"
+            header = f"{score_color} [{source_label}] {ticker_badge}{summary}"
+            if score is not None:
+                header += f"  —  score {score}/100"
+
+            with st.expander(header):
+                c1, c2, c3, c4, c5 = st.columns(5)
+                c1.metric("Score", score if score is not None else "—")
+                c2.metric("Falsifiable", "✓" if r.get("has_falsifiable_thesis") else "✗")
+                c3.metric("Evidence", "✓" if r.get("cites_evidence") else "✗")
+                c4.metric("Risk noted", "✓" if r.get("acknowledges_risk") else "✗")
+                c5.metric("Business", "✓" if r.get("is_business_focused") else "✗")
+
+                if r.get("central_claim"):
+                    st.markdown(f"**Central claim:** {r['central_claim']}")
+
+                st.markdown(f"**Title:** {r['title']}")
+                ts = (r.get("timestamp") or "")[:10]
+                st.caption(f"Source: {source_label}  ·  {ts}  ·  [Open original]({r['url']})")
