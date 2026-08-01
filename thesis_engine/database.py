@@ -84,6 +84,49 @@ def init_db() -> None:
             );
         """)
 
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS macro_events (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                raw_id              TEXT NOT NULL UNIQUE,
+                source              TEXT NOT NULL,
+                title               TEXT NOT NULL,
+                url                 TEXT,
+                published_at        TEXT,
+                fetched_at          TEXT NOT NULL,
+                plain_summary       TEXT,
+                investor_takeaway   TEXT,
+                macro_theme         TEXT,
+                relevance_score     INTEGER,
+                affected_industries TEXT,
+                analyzed_at         TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS market_snapshots (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker      TEXT NOT NULL,
+                date        TEXT NOT NULL,
+                open        REAL,
+                high        REAL,
+                low         REAL,
+                close       REAL,
+                volume      INTEGER,
+                market_cap  REAL,
+                pe_ratio    REAL,
+                fetched_at  TEXT NOT NULL,
+                UNIQUE(ticker, date)
+            );
+
+            CREATE TABLE IF NOT EXISTS macro_indicators (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                series_id   TEXT NOT NULL,
+                series_name TEXT NOT NULL,
+                date        TEXT NOT NULL,
+                value       REAL NOT NULL,
+                fetched_at  TEXT NOT NULL,
+                UNIQUE(series_id, date)
+            );
+        """)
+
         # Migration: if evaluations table is missing bear_case, it's the old schema.
         # Drop and recreate signals + evaluations (safe — they contain no real data yet).
         cols = {row[1] for row in conn.execute("PRAGMA table_info(evaluations)").fetchall()}

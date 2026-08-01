@@ -29,8 +29,25 @@ EDGAR_WATCHLIST = [t.strip().upper() for t in os.getenv("EDGAR_WATCHLIST", "").s
 EDGAR_FILING_TYPES = [t.strip().upper() for t in os.getenv("EDGAR_FILING_TYPES", "10-K,10-Q,8-K").split(",") if t.strip()]
 
 RSS_FEEDS = [
-    "https://feeds.reuters.com/reuters/businessNews",
     "https://feeds.marketwatch.com/marketwatch/topstories/",
-    "https://www.cnbc.com/id/20910258/device/rss/rss.html",
     "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+    "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+    "https://feeds.npr.org/1006/rss.xml",
+    "https://www.theguardian.com/uk/business/rss",
+    "https://www.ft.com/markets?format=rss",
 ]
+
+FRED_API_KEY = os.getenv("FRED_API_KEY", "")
+FRED_SERIES = [
+    ("CPIAUCSL", "CPI (All Urban Consumers)"),
+    ("FEDFUNDS", "Federal Funds Rate"),
+    ("UNRATE",   "Unemployment Rate"),
+    ("DGS10",    "10-Year Treasury Yield"),
+    ("T10YIE",   "10-Year Breakeven Inflation"),
+]
+
+REDDIT_CLIENT_ID     = os.getenv("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
+REDDIT_USER_AGENT    = os.getenv("REDDIT_USER_AGENT", "thesis-engine research")
+REDDIT_SUBREDDITS    = [s.strip() for s in os.getenv("REDDIT_SUBREDDITS", "stocks,investing,SecurityAnalysis").split(",") if s.strip()]

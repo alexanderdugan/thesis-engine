@@ -6,7 +6,7 @@ from thesis_engine.database import init_db, get_conn
 from research.adapters.base import Signal
 from research.adapters.edgar import EdgarAdapter
 from research.adapters.rss import RssAdapter
-# from research.adapters.reddit import RedditAdapter  # uncomment to enable
+from research.adapters.reddit import RedditAdapter
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 ADAPTER_REGISTRY = [
     EdgarAdapter(),
     RssAdapter(),
-    # RedditAdapter(),
+    RedditAdapter(),
 ]
 
 

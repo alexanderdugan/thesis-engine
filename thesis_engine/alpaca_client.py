@@ -3,8 +3,8 @@ import time
 from datetime import date, timedelta
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, GetCalendarRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus
+from alpaca.trading.requests import MarketOrderRequest, GetCalendarRequest, GetOrdersRequest
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, QueryOrderStatus
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestTradeRequest
 from alpaca.common.exceptions import APIError
@@ -51,6 +51,17 @@ class AlpacaClient:
         order = self._trading.submit_order(req)
         return {"order_id": str(order.id), "status": str(order.status)}
 
+    _TERMINAL_FAILURE_STATUSES = frozenset({
+        OrderStatus.REJECTED,
+        OrderStatus.CANCELED,
+        OrderStatus.EXPIRED,
+        OrderStatus.DONE_FOR_DAY,
+        OrderStatus.REPLACED,
+        OrderStatus.STOPPED,
+        OrderStatus.SUSPENDED,
+        OrderStatus.CALCULATED,
+    })
+
     def get_order(self, order_id: str) -> dict:
         order = self._trading.get_order_by_id(order_id)
         filled = order.status == OrderStatus.FILLED
@@ -61,7 +72,7 @@ class AlpacaClient:
             "filled_avg_price": float(order.filled_avg_price) if filled and order.filled_avg_price else None,
             "filled_qty": int(float(order.filled_qty)) if filled and order.filled_qty else None,
             "filled_at": str(order.filled_at) if filled else None,
-            "rejected": order.status in (OrderStatus.REJECTED, OrderStatus.CANCELED),
+            "rejected": order.status in self._TERMINAL_FAILURE_STATUSES,
         }
 
     def poll_order_until_filled(self, order_id: str, timeout: float = 10.0, interval: float = 0.5) -> dict:
@@ -113,6 +124,24 @@ class AlpacaClient:
             }
             for p in positions
         ]
+
+    def get_filled_buy_order_for_symbol(self, symbol: str) -> dict | None:
+        """Return the most recent filled buy order for a symbol, or None."""
+        req = GetOrdersRequest(
+            status=QueryOrderStatus.ALL,
+            symbols=[symbol],
+            limit=50,
+        )
+        orders = self._trading.get_orders(filter=req)
+        for o in sorted(orders, key=lambda x: x.submitted_at or "", reverse=True):
+            if o.status == OrderStatus.FILLED and o.side == OrderSide.BUY:
+                return {
+                    "order_id": str(o.id),
+                    "filled_avg_price": float(o.filled_avg_price),
+                    "filled_qty": int(float(o.filled_qty)),
+                    "filled_at": str(o.filled_at),
+                }
+        return None
 
     def get_latest_prices(self, symbols: list[str]) -> dict[str, float]:
         req = StockLatestTradeRequest(symbol_or_symbols=symbols)

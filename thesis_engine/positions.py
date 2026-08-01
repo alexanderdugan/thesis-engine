@@ -146,12 +146,45 @@ def sync_positions() -> tuple[list[dict], str]:
                 pos["status"] = "open"
                 pos["entry_price"] = order_info["filled_avg_price"]
             elif order_info["rejected"]:
-                with get_conn() as conn:
-                    conn.execute(
-                        "UPDATE positions SET status = 'rejected' WHERE id = ?",
-                        (pos["id"],),
-                    )
-                continue  # drop from results
+                # Original order expired/rejected — check if Alpaca has a live position
+                # anyway (e.g. a different fill that created the position)
+                live_alpaca = alpaca_positions.get(pos["symbol"])
+                if live_alpaca:
+                    filled_order = _client.get_filled_buy_order_for_symbol(pos["symbol"])
+                    if filled_order:
+                        with get_conn() as conn:
+                            conn.execute(
+                                """
+                                UPDATE positions
+                                SET status = 'open', entry_price = ?, qty = ?,
+                                    alpaca_order_id = ?, opened_at = ?
+                                WHERE id = ?
+                                """,
+                                (
+                                    filled_order["filled_avg_price"],
+                                    filled_order["filled_qty"],
+                                    filled_order["order_id"],
+                                    filled_order["filled_at"],
+                                    pos["id"],
+                                ),
+                            )
+                        pos["status"] = "open"
+                        pos["entry_price"] = filled_order["filled_avg_price"]
+                        pos["qty"] = filled_order["filled_qty"]
+                    else:
+                        with get_conn() as conn:
+                            conn.execute(
+                                "UPDATE positions SET status = 'rejected' WHERE id = ?",
+                                (pos["id"],),
+                            )
+                        continue
+                else:
+                    with get_conn() as conn:
+                        conn.execute(
+                            "UPDATE positions SET status = 'rejected' WHERE id = ?",
+                            (pos["id"],),
+                        )
+                    continue
             else:
                 pos["current_price"] = None
                 pos["unrealized_pl"] = None

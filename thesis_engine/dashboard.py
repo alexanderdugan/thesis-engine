@@ -1,3 +1,4 @@
+import json
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -15,17 +16,137 @@ init_db()
 
 st.set_page_config(page_title="Thesis Engine", layout="wide", page_icon="📈")
 
+# ── Global styles ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-.overdue { color: #ff4b4b; font-weight: bold; }
-.on-track { color: #21c354; }
-.metric-card { background: #1e1e1e; border-radius: 8px; padding: 1rem; }
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background: #0d1320 !important;
+    border-right: 1px solid rgba(255,255,255,0.06);
+}
+[data-testid="stSidebar"] .stRadio label {
+    font-size: 0.9rem;
+    letter-spacing: 0.01em;
+}
+
+/* Metric cards */
+[data-testid="stMetric"] {
+    background: #111827;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 1rem 1.25rem !important;
+}
+[data-testid="stMetricLabel"] > div {
+    font-size: 0.7rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b !important;
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.35rem !important;
+    font-weight: 700;
+    color: #f1f5f9 !important;
+}
+
+/* Expanders */
+[data-testid="stExpander"] {
+    background: #111827;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 12px !important;
+    margin-bottom: 0.6rem;
+}
+[data-testid="stExpander"] summary {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+/* Primary button */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em;
+    padding: 0.45rem 1.2rem !important;
+    transition: opacity 0.15s;
+}
+.stButton > button[kind="primary"]:hover { opacity: 0.88; }
+
+/* Secondary button */
+.stButton > button[kind="secondary"] {
+    background: #1e293b !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    border-radius: 8px !important;
+    color: #cbd5e1 !important;
+    font-weight: 500 !important;
+}
+
+/* Alerts */
+.stSuccess { background: rgba(16,185,129,0.1) !important; border-left: 3px solid #10b981; border-radius: 0 8px 8px 0; }
+.stWarning { background: rgba(245,158,11,0.1) !important; border-left: 3px solid #f59e0b; border-radius: 0 8px 8px 0; }
+.stError   { background: rgba(239,68,68,0.1)  !important; border-left: 3px solid #ef4444; border-radius: 0 8px 8px 0; }
+.stInfo    { background: rgba(99,102,241,0.1) !important; border-left: 3px solid #6366f1; border-radius: 0 8px 8px 0; }
+
+/* Forms */
+[data-testid="stForm"] {
+    background: #111827;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 1.5rem !important;
+}
+
+/* Inputs */
+input, textarea, select {
+    background: #0d1117 !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    border-radius: 8px !important;
+    color: #e2e8f0 !important;
+}
+
+/* Selectbox */
+[data-baseweb="select"] > div {
+    background: #0d1117 !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    border-radius: 8px !important;
+}
+
+/* Divider */
+hr { border-color: rgba(255,255,255,0.06) !important; margin: 1.5rem 0; }
+
+/* Caption / small text */
+.stCaption { color: #64748b !important; }
+
+/* Page title */
+h1 { font-weight: 800 !important; letter-spacing: -0.02em; }
+h2 { font-weight: 700 !important; letter-spacing: -0.01em; }
+h3 { font-weight: 600 !important; }
+
+/* Positive / negative P&L helper classes */
+.pnl-pos { color: #10b981; font-weight: 700; }
+.pnl-neg { color: #ef4444; font-weight: 700; }
+
+/* Industry badge */
+.badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin: 2px 3px;
+}
+.badge-pos  { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+.badge-neg  { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+.badge-mix  { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+.badge-theme{ background: rgba(99,102,241,0.15); color: #818cf8; border: 1px solid rgba(99,102,241,0.3); }
 </style>
 """, unsafe_allow_html=True)
 
+# ── Sidebar ────────────────────────────────────────────────────────────────────
+st.sidebar.markdown("## 📈 Thesis Engine")
+
 page = st.sidebar.radio(
     "Navigate",
-    ["Positions", "New Trade", "Performance", "Thesis Journal", "Research"],
+    ["Positions", "New Trade", "Performance", "Thesis Journal", "Research", "Economy", "Market"],
     index=0,
 )
 
@@ -37,12 +158,14 @@ _mkt = _market_status()
 if _mkt["is_open"]:
     st.sidebar.success("Market open")
 else:
-    from datetime import datetime, timezone as _tz
     next_open_dt = datetime.fromisoformat(_mkt["next_open"])
     next_open_str = next_open_dt.strftime("%a %b %-d, %-I:%M %p ET")
     st.sidebar.warning(f"Market closed · opens {next_open_str}")
 
-# ─── POSITIONS ────────────────────────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.caption("Paper trading via Alpaca · Phase 3")
+
+# ── POSITIONS ─────────────────────────────────────────────────────────────────
 if page == "Positions":
     st.title("Open Positions")
 
@@ -68,12 +191,10 @@ if page == "Positions":
             if is_pending:
                 header = f"⏳ {symbol}  —  Pending (fills at market open)"
             else:
-                pl = pos.get('unrealized_pl') or 0
-                plpc = (pos.get('unrealized_plpc') or 0) * 100
-                header = (
-                    f"{'🔴 ' if overdue else ''}{symbol}  —  "
-                    f"{'▲' if pl >= 0 else '▼'} ${pl:+,.2f}  ({plpc:+.2f}%)"
-                )
+                pl = pos.get("unrealized_pl") or 0
+                plpc = (pos.get("unrealized_plpc") or 0) * 100
+                arrow = "▲" if pl >= 0 else "▼"
+                header = f"{'🔴 ' if overdue else ''}{symbol}  —  {arrow} ${pl:+,.2f}  ({plpc:+.2f}%)"
 
             with st.expander(header, expanded=True):
                 col1, col2, col3, col4 = st.columns(4)
@@ -87,7 +208,7 @@ if page == "Positions":
                     col4.metric("Timeline", "—")
 
                 if is_pending:
-                    st.info("OPG order submitted — this position will fill at the next market open and update automatically on sync.")
+                    st.info("OPG order submitted — fills at next market open.")
 
                 st.markdown(f"**Thesis:** {pos.get('thesis_text', '—')}")
                 st.markdown(f"**Falsification:** {pos.get('falsification_criteria', '—')}")
@@ -117,14 +238,13 @@ if page == "Positions":
                                 except Exception as e:
                                     st.error(str(e))
 
-# ─── NEW TRADE ────────────────────────────────────────────────────────────────
+# ── NEW TRADE ─────────────────────────────────────────────────────────────────
 elif page == "New Trade":
     st.title("New Trade")
     if _mkt["is_open"]:
         st.caption("Market is open — order will fill immediately.")
     else:
-        from datetime import datetime as _dt2
-        next_open = _dt2.fromisoformat(_mkt["next_open"]).strftime("%a %b %-d, %-I:%M %p ET")
+        next_open = datetime.fromisoformat(_mkt["next_open"]).strftime("%a %b %-d, %-I:%M %p ET")
         st.caption(f"Market is closed — order will be submitted as OPG and fill at next open ({next_open}).")
 
     with st.form("new_trade_form"):
@@ -156,7 +276,6 @@ elif page == "New Trade":
             height=100,
             placeholder="e.g. 'Revenue growth falls below 15% YoY' or 'Stock breaks below $X support'",
         )
-
         submitted = st.form_submit_button("Place Order & Record Thesis", type="primary")
 
     if submitted:
@@ -190,8 +309,7 @@ elif page == "New Trade":
                     )
                     st.balloons()
                 else:
-                    from datetime import datetime as _dt
-                    next_open = _dt.fromisoformat(result["next_open"]).strftime("%a %b %-d, %-I:%M %p ET")
+                    next_open = datetime.fromisoformat(result["next_open"]).strftime("%a %b %-d, %-I:%M %p ET")
                     st.warning(
                         f"Market is closed. OPG order queued for {symbol} ({qty} share(s)) — "
                         f"will fill at market open ({next_open}). Thesis recorded."
@@ -203,7 +321,7 @@ elif page == "New Trade":
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# ─── PERFORMANCE ──────────────────────────────────────────────────────────────
+# ── PERFORMANCE ───────────────────────────────────────────────────────────────
 elif page == "Performance":
     st.title("Performance")
 
@@ -232,19 +350,13 @@ elif page == "Performance":
             m1.metric("Portfolio Value", f"${summary['portfolio_value']:,.2f}")
             m2.metric(
                 "Portfolio Return",
-                f"{summary['portfolio_cumulative']:+.2f}%" if summary['portfolio_cumulative'] is not None else "—",
+                f"{summary['portfolio_cumulative']:+.2f}%" if summary["portfolio_cumulative"] is not None else "—",
             )
-            m3.metric(
-                "SPY",
-                f"{summary['spy_cumulative']:+.2f}%" if summary['spy_cumulative'] is not None else "—",
-            )
-            m4.metric(
-                "QQQ",
-                f"{summary['qqq_cumulative']:+.2f}%" if summary['qqq_cumulative'] is not None else "—",
-            )
+            m3.metric("SPY", f"{summary['spy_cumulative']:+.2f}%" if summary["spy_cumulative"] is not None else "—")
+            m4.metric("QQQ", f"{summary['qqq_cumulative']:+.2f}%" if summary["qqq_cumulative"] is not None else "—")
             m5.metric(
                 "Alpha vs SPY",
-                f"{summary['alpha_vs_spy']:+.2f}%" if summary['alpha_vs_spy'] is not None else "—",
+                f"{summary['alpha_vs_spy']:+.2f}%" if summary["alpha_vs_spy"] is not None else "—",
             )
 
         st.subheader("Cumulative Return")
@@ -252,24 +364,27 @@ elif page == "Performance":
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=df["date"], y=df["portfolio_return_cumulative"],
-            name="Portfolio", line=dict(color="#00d4aa", width=2),
+            name="Portfolio", line=dict(color="#10b981", width=2.5),
         ))
         fig.add_trace(go.Scatter(
             x=df["date"], y=df["spy_return_cumulative"],
-            name="SPY", line=dict(color="#636efa", width=2, dash="dot"),
+            name="SPY", line=dict(color="#6366f1", width=2, dash="dot"),
         ))
         fig.add_trace(go.Scatter(
             x=df["date"], y=df["qqq_return_cumulative"],
-            name="QQQ", line=dict(color="#ef553b", width=2, dash="dot"),
+            name="QQQ", line=dict(color="#f59e0b", width=2, dash="dot"),
         ))
-        fig.add_hline(y=0, line_color="gray", line_dash="dash", opacity=0.4)
+        fig.add_hline(y=0, line_color="rgba(255,255,255,0.15)", line_dash="dash")
         fig.update_layout(
             yaxis_title="Cumulative Return (%)",
             xaxis_title="Date",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
-            height=400,
+            font=dict(color="#94a3b8"),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+            yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+            height=420,
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -282,7 +397,7 @@ elif page == "Performance":
                 use_container_width=True,
             )
 
-# ─── THESIS JOURNAL ───────────────────────────────────────────────────────────
+# ── THESIS JOURNAL ────────────────────────────────────────────────────────────
 elif page == "Thesis Journal":
     st.title("Thesis Journal")
 
@@ -295,10 +410,7 @@ elif page == "Thesis Journal":
 
     if search:
         q = search.lower()
-        theses = [
-            t for t in theses
-            if q in t["symbol"].lower() or q in (t.get("thesis_text") or "").lower()
-        ]
+        theses = [t for t in theses if q in t["symbol"].lower() or q in (t.get("thesis_text") or "").lower()]
 
     if not theses:
         st.info("No theses found.")
@@ -336,10 +448,9 @@ elif page == "Thesis Journal":
                 closed_str = f"  →  Closed {closed[:10]}" if closed else ""
                 st.caption(f"Opened {opened}{closed_str}")
 
-# ─── RESEARCH ─────────────────────────────────────────────────────────────────
+# ── RESEARCH ──────────────────────────────────────────────────────────────────
 elif page == "Research":
     import hashlib
-    import json as _json
     from datetime import datetime as _dt2, timezone as _tz2
     from research.evaluator import get_evaluator
     from research.adapters.base import Signal as _Signal
@@ -349,7 +460,6 @@ elif page == "Research":
     evaluator_label = "mock evaluator" if USE_MOCK_EVALUATOR else "Claude claude-sonnet-4-6"
     st.caption(f"SEC EDGAR + financial news RSS, evaluated for argument quality ({evaluator_label}).")
 
-    # ── Manual paste-in ──────────────────────────────────────────────────────
     with st.expander("Paste & Evaluate — run any text through the evaluator", expanded=False):
         with st.form("manual_eval_form"):
             paste_content = st.text_area(
@@ -402,8 +512,8 @@ elif page == "Research":
                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                 (signal.source, signal.raw_id, signal.ticker, signal.title,
                                  signal.summary, signal.url, signal.timestamp,
-                                 (paste_content.strip())[:300],
-                                 _json.dumps(signal.metadata), signal.fetched_at),
+                                 paste_content.strip()[:300],
+                                 json.dumps(signal.metadata), signal.fetched_at),
                             )
                             sig_id = cur.lastrowid or _c.execute(
                                 "SELECT id FROM signals WHERE source='manual' AND raw_id=?", (raw_id,)
@@ -506,3 +616,356 @@ elif page == "Research":
                 st.markdown(f"**Title:** {r['title']}")
                 ts = (r.get("timestamp") or "")[:10]
                 st.caption(f"Source: {source_label}  ·  {ts}  ·  [Open original]({r['url']})")
+
+# ── ECONOMY (Phase 3) ─────────────────────────────────────────────────────────
+elif page == "Economy":
+    from research.macro.fetcher import fetch_macro_news
+    from research.macro.analyzer import analyze_macro_event
+    from thesis_engine.config import ANTHROPIC_API_KEY as _ANTHROPIC_KEY
+
+    st.title("Global Economy")
+    st.caption(
+        "Live geopolitical and economic news, analyzed by AI to show which industries are affected "
+        "and what it means for your portfolio — in plain English."
+    )
+
+    _key_missing = not _ANTHROPIC_KEY or _ANTHROPIC_KEY.startswith("your_")
+    if _key_missing:
+        st.error(
+            "**Anthropic API key not configured.** "
+            "Add `ANTHROPIC_API_KEY=sk-ant-...` to your `.env` file and restart the app. "
+            "Without it the Economy analyzer cannot run."
+        )
+
+    col_refresh, col_filter, col_min_score = st.columns([1, 2, 2])
+
+    with col_refresh:
+        do_refresh = st.button("Refresh News", type="primary", disabled=_key_missing)
+
+    theme_options = ["All Themes", "Trade War", "Interest Rates", "Geopolitical Risk", "Fed Policy",
+                     "Inflation", "Energy Markets", "Currency", "Labor Market",
+                     "Government Spending", "Regulation", "Corporate Earnings",
+                     "Supply Chain", "Housing"]
+    theme_filter = col_filter.selectbox("Theme", theme_options, index=0)
+    min_score = col_min_score.slider("Minimum relevance score", 0, 100, 40, step=5)
+
+    if do_refresh:
+        with st.spinner("Fetching latest news..."):
+            items = fetch_macro_news()
+
+        if not items:
+            st.warning("No articles returned from news feeds. The feeds may be temporarily unavailable.")
+        else:
+            with get_conn() as conn:
+                existing_ids = {
+                    row[0] for row in conn.execute("SELECT raw_id FROM macro_events").fetchall()
+                }
+
+            new_items = [it for it in items if it["raw_id"] not in existing_ids]
+            st.caption(f"Found {len(items)} articles · {len(new_items)} new")
+
+            if new_items:
+                progress = st.progress(0, text="Analyzing with Claude...")
+                analyzed = 0
+                _api_error_shown = False
+                for i, item in enumerate(new_items):
+                    result = analyze_macro_event(item)
+                    if result is None and not _api_error_shown:
+                        st.error(
+                            "Analysis failed on first article — likely an invalid Anthropic API key or API error. "
+                            "Check your `.env` file and the terminal logs."
+                        )
+                        _api_error_shown = True
+                    if result:
+                        with get_conn() as conn:
+                            conn.execute(
+                                """INSERT OR IGNORE INTO macro_events
+                                   (raw_id, source, title, url, published_at, fetched_at,
+                                    plain_summary, investor_takeaway, macro_theme,
+                                    relevance_score, affected_industries, analyzed_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (
+                                    item["raw_id"], item["source"], item["title"],
+                                    item.get("url"), item.get("published_at"), item["fetched_at"],
+                                    result.get("plain_summary"),
+                                    result.get("investor_takeaway"),
+                                    result.get("macro_theme"),
+                                    result.get("relevance_score"),
+                                    json.dumps(result.get("affected_industries", [])),
+                                    result["analyzed_at"],
+                                ),
+                            )
+                        analyzed += 1
+                    progress.progress((i + 1) / len(new_items), text=f"Analyzed {i+1}/{len(new_items)}...")
+
+                progress.empty()
+                if analyzed > 0:
+                    st.success(f"Added {analyzed} new events to the economy feed.")
+                    st.rerun()
+                elif not _api_error_shown:
+                    st.warning("No events were successfully analyzed.")
+            else:
+                st.info("No new articles since last refresh.")
+
+    # ── FRED numeric indicators ────────────────────────────────────────────────
+    from research.macro.fred import get_latest_indicators, refresh_macro_indicators
+    from thesis_engine.config import FRED_API_KEY as _FRED_KEY
+
+    st.subheader("Economic Indicators")
+    if not _FRED_KEY:
+        st.info(
+            "Add `FRED_API_KEY=` to `.env` (free at fred.stlouisfed.org) to enable "
+            "real-time CPI, interest rate, unemployment, and Treasury yield data."
+        )
+    else:
+        fred_col_refresh, fred_col_spacer = st.columns([1, 5])
+        if fred_col_refresh.button("Refresh Indicators", key="fred_refresh"):
+            with st.spinner("Fetching from FRED..."):
+                fred_result = refresh_macro_indicators()
+            st.success(f"Updated {fred_result['ok']} observations across {fred_result['series']} series.")
+            st.rerun()
+
+        indicators = get_latest_indicators()
+        if not indicators:
+            st.info("No indicator data yet — click **Refresh Indicators** to pull from FRED.")
+        else:
+            ind_cols = st.columns(len(indicators))
+            for col, ind in zip(ind_cols, indicators):
+                val = ind["latest_value"]
+                history = ind["history"]
+                prev = history[-2]["value"] if len(history) >= 2 else None
+                delta = f"{val - prev:+.2f}" if prev is not None else None
+                col.metric(
+                    ind["series_name"],
+                    f"{val:.2f}%",
+                    delta,
+                    help=f"As of {ind['latest_date']} · FRED {ind['series_id']}",
+                )
+
+            with st.expander("Trend charts", expanded=False):
+                for ind in indicators:
+                    history = ind["history"]
+                    if len(history) < 2:
+                        continue
+                    hdf = pd.DataFrame(history)
+                    fig = go.Figure(go.Scatter(
+                        x=hdf["date"], y=hdf["value"],
+                        mode="lines+markers",
+                        line=dict(color="#6366f1", width=2),
+                        marker=dict(size=5),
+                        name=ind["series_name"],
+                    ))
+                    fig.update_layout(
+                        title=ind["series_name"],
+                        height=200,
+                        margin=dict(l=0, r=0, t=30, b=0),
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#94a3b8", size=11),
+                        xaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+                        yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+    st.subheader("Macro News")
+
+    # Load from DB
+    query = "SELECT * FROM macro_events WHERE analyzed_at IS NOT NULL"
+    params: list = []
+    if theme_filter != "All Themes":
+        query += " AND macro_theme = ?"
+        params.append(theme_filter)
+    if min_score > 0:
+        query += " AND relevance_score >= ?"
+        params.append(min_score)
+    query += " ORDER BY relevance_score DESC, published_at DESC LIMIT 60"
+
+    with get_conn() as conn:
+        rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    if not rows:
+        st.info("No economy data yet — click **Refresh News** to pull the latest articles and analyze them.")
+    else:
+        st.caption(f"{len(rows)} events")
+        st.divider()
+
+        for r in rows:
+            score = r.get("relevance_score") or 0
+            theme = r.get("macro_theme") or "—"
+            score_icon = "🔴" if score >= 75 else "🟡" if score >= 50 else "⚪"
+
+            header = f"{score_icon} {r['title']}"
+
+            with st.expander(header, expanded=False):
+                # Score + theme + source row
+                mc1, mc2, mc3 = st.columns([1, 2, 2])
+                mc1.metric("Relevance", f"{score}/100")
+                mc2.metric("Theme", theme)
+                mc3.metric("Source", r.get("source", "—"))
+
+                # Plain summary
+                if r.get("plain_summary"):
+                    st.markdown(f"**What happened:** {r['plain_summary']}")
+
+                # Industry impact badges
+                industries_raw = r.get("affected_industries")
+                if industries_raw:
+                    try:
+                        industries = json.loads(industries_raw) if isinstance(industries_raw, str) else industries_raw
+                        if industries:
+                            badge_html = ""
+                            for ind in industries:
+                                impact = ind.get("impact", "mixed").lower()
+                                cls = "badge-pos" if impact == "positive" else "badge-neg" if impact == "negative" else "badge-mix"
+                                icon = "↑" if impact == "positive" else "↓" if impact == "negative" else "~"
+                                badge_html += f'<span class="badge {cls}">{icon} {ind["name"]}</span>'
+                            st.markdown(
+                                f'<div style="margin: 0.5rem 0">'
+                                f'<span style="font-size:0.8rem;color:#64748b;margin-right:6px">Affected sectors:</span>'
+                                f'{badge_html}</div>',
+                                unsafe_allow_html=True,
+                            )
+
+                            # Expand detail per industry
+                            with st.expander("Why these sectors?", expanded=False):
+                                for ind in industries:
+                                    impact = ind.get("impact", "mixed").lower()
+                                    color = "#10b981" if impact == "positive" else "#ef4444" if impact == "negative" else "#f59e0b"
+                                    st.markdown(
+                                        f'<span style="color:{color};font-weight:600">{ind["name"]}</span> — {ind.get("reason", "—")}',
+                                        unsafe_allow_html=True,
+                                    )
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                # Investor takeaway
+                if r.get("investor_takeaway"):
+                    st.markdown(
+                        f'<div style="background:rgba(99,102,241,0.1);border-left:3px solid #6366f1;'
+                        f'border-radius:0 8px 8px 0;padding:0.6rem 1rem;margin-top:0.75rem">'
+                        f'<span style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.08em;color:#818cf8">Investor takeaway</span><br>'
+                        f'<span style="color:#e2e8f0">{r["investor_takeaway"]}</span></div>',
+                        unsafe_allow_html=True,
+                    )
+
+                pub = (r.get("published_at") or "")[:10]
+                url = r.get("url")
+                link_str = f'  ·  [Read article]({url})' if url else ""
+                st.caption(f"{r.get('source', '')}  ·  {pub}{link_str}")
+
+# ── MARKET ────────────────────────────────────────────────────────────────────
+elif page == "Market":
+    from market_data.yahoo import refresh_market_data, get_latest_snapshots
+    from market_data.watchlist import get_ticker_universe
+
+    st.title("Market Data")
+    st.caption("Price and fundamentals for your watchlist and open positions, via Yahoo Finance.")
+
+    col_refresh, col_spacer = st.columns([1, 5])
+    if col_refresh.button("Refresh Market Data", type="primary"):
+        tickers = get_ticker_universe()
+        if not tickers:
+            st.warning("No tickers in watchlist or open positions. Add tickers to EDGAR_WATCHLIST in .env.")
+        else:
+            with st.spinner(f"Fetching data for {len(tickers)} ticker(s)..."):
+                result = refresh_market_data()
+            if result["failed"] > 0:
+                st.warning(f"Fetched {result['ok']}/{result['tickers']} tickers ({result['failed']} failed — check logs).")
+            else:
+                st.success(f"Updated {result['ok']} ticker(s).")
+            st.rerun()
+
+    universe = get_ticker_universe()
+    snapshots = get_latest_snapshots(universe) if universe else []
+
+    if not snapshots:
+        st.info("No market data yet — click **Refresh Market Data** to pull prices and fundamentals.")
+    else:
+        st.caption(f"{len(snapshots)} ticker(s)  ·  as of {snapshots[0]['date'] if snapshots else '—'}")
+
+        # Summary metrics row
+        rows_by_ticker = {s["ticker"]: s for s in snapshots}
+
+        # Fetch live Alpaca prices for open positions
+        @st.cache_data(ttl=60)
+        def _live_prices():
+            from thesis_engine.alpaca_client import AlpacaClient
+            from thesis_engine.positions import list_open_positions
+            open_syms = [p["symbol"] for p in list_open_positions() if p["status"] == "open"]
+            if not open_syms:
+                return {}
+            try:
+                return AlpacaClient().get_latest_prices(open_syms)
+            except Exception:
+                return {}
+
+        live = _live_prices()
+
+        # Table view
+        table_data = []
+        for snap in snapshots:
+            sym = snap["ticker"]
+            close = live.get(sym) or snap.get("close")
+            mc = snap.get("market_cap")
+            pe = snap.get("pe_ratio")
+            table_data.append({
+                "Ticker": sym,
+                "Price": f"${close:,.2f}" if close else "—",
+                "Market Cap": f"${mc/1e9:.1f}B" if mc else "—",
+                "P/E": f"{pe:.1f}" if pe else "—",
+                "As of": snap.get("date", "—"),
+            })
+
+        st.dataframe(
+            pd.DataFrame(table_data).set_index("Ticker"),
+            use_container_width=True,
+        )
+
+        st.divider()
+
+        # Per-ticker expanders with sparklines
+        for snap in snapshots:
+            sym = snap["ticker"]
+            close = live.get(sym) or snap.get("close")
+            mc = snap.get("market_cap")
+            pe = snap.get("pe_ratio")
+
+            header = f"**{sym}**"
+            if close:
+                header += f"  —  ${close:,.2f}"
+
+            with st.expander(header, expanded=False):
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Last Price", f"${close:,.2f}" if close else "—")
+                c2.metric("Market Cap", f"${mc/1e9:.1f}B" if mc else "—")
+                c3.metric("P/E Ratio", f"{pe:.1f}" if pe else "—")
+                c4.metric("Volume", f"{snap.get('volume') or 0:,}" if snap.get("volume") else "—")
+
+                # Historical sparkline (last 30 days)
+                with get_conn() as _c:
+                    hist_rows = _c.execute(
+                        "SELECT date, close FROM market_snapshots WHERE ticker=? AND close IS NOT NULL ORDER BY date DESC LIMIT 30",
+                        (sym,),
+                    ).fetchall()
+                if len(hist_rows) >= 2:
+                    hist_df = pd.DataFrame([dict(r) for r in reversed(hist_rows)])
+                    fig = go.Figure(go.Scatter(
+                        x=hist_df["date"], y=hist_df["close"],
+                        mode="lines",
+                        line=dict(color="#10b981", width=2),
+                        fill="tozeroy",
+                        fillcolor="rgba(16,185,129,0.08)",
+                    ))
+                    fig.update_layout(
+                        height=160,
+                        margin=dict(l=0, r=0, t=0, b=0),
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#94a3b8", size=10),
+                        xaxis=dict(gridcolor="rgba(255,255,255,0.05)", showticklabels=False),
+                        yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
