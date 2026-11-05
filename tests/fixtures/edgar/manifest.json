@@ -1,0 +1,29 @@
+[
+  {
+    "file": "aapl_10k_2025-10-31.html.gz",
+    "ticker": "AAPL",
+    "cik": 320193,
+    "form": "10-K",
+    "accession": "0000320193-25-000079",
+    "filing_date": "2025-10-31",
+    "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
+  },
+  {
+    "file": "msft_10k_2025-07-30.html.gz",
+    "ticker": "MSFT",
+    "cik": 789019,
+    "form": "10-K",
+    "accession": "0000950170-25-100235",
+    "filing_date": "2025-07-30",
+    "url": "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/msft-20250630.htm"
+  },
+  {
+    "file": "nvda_10q_2025-11-19.html.gz",
+    "ticker": "NVDA",
+    "cik": 1045810,
+    "form": "10-Q",
+    "accession": "0001045810-25-000230",
+    "filing_date": "2025-11-19",
+    "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000230/nvda-20251026.htm"
+  }
+]

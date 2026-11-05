@@ -1,7 +1,6 @@
 from __future__ import annotations
 import json
 import logging
-import re
 import time
 from datetime import datetime, timezone, timedelta
 
@@ -10,6 +9,7 @@ from bs4 import BeautifulSoup
 
 from thesis_engine.config import EDGAR_USER_AGENT, EDGAR_WATCHLIST, EDGAR_FILING_TYPES
 from research.adapters.base import Signal, SourceAdapter
+from research.filings.sections import SECTIONS, find_section_in_text, html_to_text
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +38,19 @@ def _build_ticker_cik_map(session: requests.Session) -> dict[str, int]:
     return {v["ticker"].upper(): v["cik_str"] for v in data.values()}
 
 
-def _extract_mda(html: str) -> str:
-    """Extract a ~3000-char excerpt starting from the MD&A section."""
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(separator=" ", strip=True)
-    # Find MD&A section header
-    pattern = re.compile(r"management.{0,10}s discussion", re.IGNORECASE)
-    match = pattern.search(text)
-    if match:
-        excerpt = text[match.start(): match.start() + 3000]
-    else:
-        # Fall back to first 3000 chars of the document body
-        excerpt = text[:3000]
-    return " ".join(excerpt.split())  # normalise whitespace
+def _extract_mda(html: str, form: str | None = None) -> str:
+    """Extract a ~3000-char excerpt starting from the MD&A section.
+
+    Uses the shared section finder, which skips the table-of-contents entry. Forms without an
+    MD&A (e.g. 8-K) or filings where it can't be located fall back to the start of the document.
+    """
+    forms = [form] if form in ("10-K", "10-Q") else ["10-K", "10-Q"]
+    text = html_to_text(html)
+    for f in forms:
+        section = find_section_in_text(text, SECTIONS[(f, "mda")])
+        if section:
+            return " ".join(section.text[:3000].split())
+    return " ".join(text[:3000].split())  # normalise whitespace
 
 
 def _now() -> str:
@@ -121,7 +121,7 @@ def _fetch_ticker_filings(
         raw_content = None
         try:
             html = _get(session, filing_url).text
-            raw_content = _extract_mda(html)
+            raw_content = _extract_mda(html, form)
         except Exception as e:
             logger.warning(f"Could not fetch/parse filing {accession}: {e}")
 
