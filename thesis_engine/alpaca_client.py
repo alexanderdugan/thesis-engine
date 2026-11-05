@@ -12,8 +12,22 @@ from alpaca.common.exceptions import APIError
 from thesis_engine.config import ALPACA_API_KEY, ALPACA_SECRET_KEY
 
 
+class MissingAlpacaCredentials(RuntimeError):
+    pass
+
+
 class AlpacaClient:
     def __init__(self):
+        missing = [
+            name for name, value in (
+                ("ALPACA_API_KEY", ALPACA_API_KEY),
+                ("ALPACA_SECRET_KEY", ALPACA_SECRET_KEY),
+            ) if not value
+        ]
+        if missing:
+            raise MissingAlpacaCredentials(
+                f"AlpacaClient needs {' and '.join(missing)} (set in .env or the environment)"
+            )
         self._trading = TradingClient(
             api_key=ALPACA_API_KEY,
             secret_key=ALPACA_SECRET_KEY,
